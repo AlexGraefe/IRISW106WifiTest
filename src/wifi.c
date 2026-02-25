@@ -3,7 +3,6 @@
 #include <zephyr/net/wifi_mgmt.h>
 
 #include "wifi.h"
-#include "wifi_pswd.h"
 
 // Event callbacks
 static struct net_mgmt_event_callback wifi_cb;
@@ -32,7 +31,7 @@ static void on_wifi_connection_event(struct net_mgmt_event_callback *cb,
             printk("WiFi disconnection failed with status: %d\n", status->status);
         }
         else {
-            printk("Disconnected!\n");
+            printk("Disconnected\n");
             k_sem_take(&sem_wifi, K_NO_WAIT);
         }
     }
@@ -68,22 +67,21 @@ void my_wifi_init(void)
 }
 
 // connect to WiFi (blocking)
-int wifi_connect()
+int wifi_connect(char *ssid, char *psk)
 {
+    // printk("h");
     int ret;
     struct net_if *iface;
-    struct wifi_connect_req_params params;
+    struct wifi_connect_req_params params = {};
 
     // Get the default network interface
     iface = net_if_get_default();  // might need to change this, if the IRIS' wifi is not the default interface
 
     // Fill in the connection request parameters
-    char my_ssid[] = BITCRAZE_SSID;
-    char my_password[] = BITCRAZE_PASSWORD;
-    params.ssid = (const uint8_t *)my_ssid;
-    params.ssid_length = strlen(my_ssid);
-    params.psk = (const uint8_t *)my_password;
-    params.psk_length = strlen(my_password);
+    params.ssid = (const uint8_t *)ssid;
+    params.ssid_length = strlen(ssid);
+    params.psk = (const uint8_t *)psk;
+    params.psk_length = strlen(psk);
     params.security = WIFI_SECURITY_TYPE_PSK;  // WPA2-PSK security
     params.band = WIFI_FREQ_BAND_UNKNOWN;  // Auto-select the band
     params.channel = WIFI_CHANNEL_ANY;  // Auto-select the channel
@@ -93,7 +91,7 @@ int wifi_connect()
     ret = net_mgmt(NET_REQUEST_WIFI_CONNECT, 
                   iface,
              &params,
-               sizeof(params));
+               sizeof(struct wifi_connect_req_params));
 
     // Wait for the connection to complete
     k_sem_take(&sem_wifi, K_FOREVER);
