@@ -8,7 +8,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 add_compile_options(-Wall -Wextra -Wpedantic)
 
 # Server executable
-add_executable(server server.c)
+add_executable(tcp_socket_server tcp_socket_server.c)
 
 # Client executable
 add_executable(client client.c)
