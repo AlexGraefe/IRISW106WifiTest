@@ -5,7 +5,7 @@ config TCP_SOCKET_DEMO
         Provides run_tcp_socket_example() to connect via WiFi and exchange
         messages with a TCP echo server.
 
-config SOCKET_THREAD_STACK_SIZE
+config TCP_SOCKET_THREAD_STACK_SIZE
     int "Stack size for the TCP socket demo thread"
     default 2048
     help

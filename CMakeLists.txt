@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20.0)
 set(ZEPHYR_EXTRA_MODULES 
     "${CMAKE_SOURCE_DIR}/modules/wifi_utilities" 
     "${CMAKE_SOURCE_DIR}/modules/tcp_socket_demo"
+    "${CMAKE_SOURCE_DIR}/modules/udp_socket_demo"
 )
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})

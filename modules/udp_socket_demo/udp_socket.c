@@ -7,7 +7,7 @@
 
 #include "wifi_utilities.h"
 #include "secret/wifi_pswd.h"
-#include "tcp_socket.h"
+#include "udp_socket.h"
 
 #include <zephyr/logging/log.h>
 
@@ -30,10 +30,10 @@ static const char *messages[] = {
 };
 
 
-LOG_MODULE_REGISTER(tcp_socket_demo, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(udp_socket_demo, LOG_LEVEL_DBG);
 
-K_THREAD_DEFINE(BLINK_THREAD, CONFIG_TCP_SOCKET_THREAD_STACK_SIZE,
-                run_tcp_socket_demo, NULL, NULL, NULL,
+K_THREAD_DEFINE(udp_thread, CONFIG_UDP_SOCKET_THREAD_STACK_SIZE,
+                run_udp_socket_demo, NULL, NULL, NULL,
                 SOCKET_THREAD_PRIORITY, 0, 0);
 
 static const char *state_to_string(communication_state_t state)
@@ -95,7 +95,7 @@ static communication_state_t state_connecting_to_server(communication_context_t 
 {
 	int ret;
 
-	ctx->sock_fd = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	ctx->sock_fd = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (ctx->sock_fd < 0) {
 		LOG_ERR("Could not create socket (errno=%d)", errno);
 		ctx->failure_from_state = COMM_CONNECTING_TO_SERVER;
@@ -196,7 +196,7 @@ static communication_state_t state_cleanup(communication_context_t *ctx)
 	return COMM_DONE;
 }
 
-int run_tcp_socket_demo(void)
+int run_udp_socket_demo(void)
 {
 	communication_state_t state = COMM_WIFI_CONNECTING;
 
