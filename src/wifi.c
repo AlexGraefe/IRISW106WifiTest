@@ -1,8 +1,11 @@
 #include <string.h>
 #include <zephyr/kernel.h>
 #include <zephyr/net/wifi_mgmt.h>
+#include <zephyr/logging/log.h>
 
 #include "wifi.h"
+
+LOG_MODULE_REGISTER(wifi, LOG_LEVEL_DBG);
 
 // Event callbacks
 static struct net_mgmt_event_callback wifi_cb;
@@ -21,17 +24,17 @@ static void on_wifi_connection_event(struct net_mgmt_event_callback *cb,
 
     if (mgmt_event == NET_EVENT_WIFI_CONNECT_RESULT) {
         if (status->status) {
-            printk("WiFi connection failed with status: %d\n", status->status);
+            LOG_ERR("WiFi connection failed with status: %d", status->status);
         } else {
-            printk("Connected!\n");
+            LOG_INF("Connected!");
             k_sem_give(&sem_wifi);
         }
     } else if (mgmt_event == NET_EVENT_WIFI_DISCONNECT_RESULT) {
         if (status->status) {
-            printk("WiFi disconnection failed with status: %d\n", status->status);
+            LOG_ERR("WiFi disconnection failed with status: %d", status->status);
         }
         else {
-            printk("Disconnected\n");
+            LOG_INF("Disconnected");
             k_sem_take(&sem_wifi, K_NO_WAIT);
         }
     }
@@ -50,7 +53,7 @@ static void on_ipv4_obtained(struct net_mgmt_event_callback *cb,
 
 
 // initialize the WIFi event callbacks
-void my_wifi_init(void)
+int my_wifi_init(void)
 {
     // Initialize the event callback
     net_mgmt_init_event_callback(&wifi_cb, 
@@ -63,7 +66,8 @@ void my_wifi_init(void)
     // Add the event callback
     net_mgmt_add_event_callback(&wifi_cb);
     net_mgmt_add_event_callback(&ipv4_cb);
-    
+
+    return 0;
 }
 
 // connect to WiFi (blocking)
@@ -100,7 +104,7 @@ int wifi_connect(char *ssid, char *psk)
 }
 
 // Wait for an IP address to be obtained (blocking)
-void wifi_wait_for_ip_addr(void) 
+int wifi_wait_for_ip_addr(void)
 {
     struct wifi_iface_status status;
     struct net_if *iface;
@@ -109,6 +113,10 @@ void wifi_wait_for_ip_addr(void)
 
     // Get interface
     iface = net_if_get_default();  // might need to change this, if the IRIS' wifi is not the default interface
+    if (iface == NULL) {
+        LOG_ERR("No default network interface found");
+        return -1;
+    }
 
     // Wait for an IPv4 address to be obtained
     k_sem_take(&sem_ipv4, K_FOREVER);
@@ -119,7 +127,8 @@ void wifi_wait_for_ip_addr(void)
                  &status,
                  sizeof(struct wifi_iface_status)))
     {
-        printk("Failed to get WiFi status\n");
+        LOG_ERR("Failed to get WiFi status");
+        return -1;
     }
 
     // Get the IP address
@@ -128,7 +137,8 @@ void wifi_wait_for_ip_addr(void)
                 &iface->config.ip.ipv4->unicast[0].ipv4.address.in_addr,
                 ip_addr, 
                 sizeof(ip_addr)) == NULL) {
-        printk("Failed to convert IP address to string\n");
+        LOG_ERR("Failed to convert IP address to string");
+        return -1;
     } 
 
     // Get the gateway address
@@ -137,20 +147,25 @@ void wifi_wait_for_ip_addr(void)
                  &iface->config.ip.ipv4->gw,
                  gw_addr,
                  sizeof(gw_addr)) == NULL) {
-        printk("Failed to convert gateway address to string\n");
+        LOG_ERR("Failed to convert gateway address to string");
+        return -1;
     }
 
     // Print the WiFi status
-    printk("WiFi status:\n");
+    LOG_INF("WiFi status:");
     if (status.state >= WIFI_STATE_ASSOCIATED) {
-        printk("  SSID: %s\n", status.ssid);
-        printk("  Band: %s\n", wifi_band_txt(status.band));
-        printk("  Channel: %d\n", status.channel);
-        printk("  Security: %s\n", wifi_security_txt(status.security));
-        printk("  RSSI: %d dBm\n", status.rssi);
-        printk("  IP Address: %s\n", ip_addr);
-        printk("  Gateway: %s\n", gw_addr);
+        LOG_INF("  SSID: %s", status.ssid);
+        LOG_INF("  Band: %s", wifi_band_txt(status.band));
+        LOG_INF("  Channel: %d", status.channel);
+        LOG_INF("  Security: %s", wifi_security_txt(status.security));
+        LOG_INF("  RSSI: %d dBm", status.rssi);
+        LOG_INF("  IP Address: %s", ip_addr);
+        LOG_INF("  Gateway: %s", gw_addr);
+        return 0;
     }
+
+    LOG_WRN("WiFi not associated");
+    return -1;
 }
 
 // Disconnect fomr the WiFi network
