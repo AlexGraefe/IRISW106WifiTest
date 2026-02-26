@@ -15,3 +15,6 @@ add_executable(udp_socket_server udp_socket_server.c)
 
 # Client executable
 add_executable(client client.c)
+
+# Client executable
+add_executable(udp_client udp_socket_client.c)

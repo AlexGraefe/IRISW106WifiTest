@@ -7,6 +7,7 @@
 
 #include "wifi_utilities.h"
 #include "secret/wifi_pswd.h"
+#include "zephyr/net/net_ip.h"
 #include "udp_socket.h"
 
 #include <zephyr/logging/log.h>
@@ -20,14 +21,6 @@ static const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
 #define LED_TURN_GREEN() do { gpio_pin_set_dt(&led_red, 0); gpio_pin_set_dt(&led_green, 1); gpio_pin_set_dt(&led_blue, 0); } while(0)
 #define LED_TURN_BLUE() do { gpio_pin_set_dt(&led_red, 0); gpio_pin_set_dt(&led_green, 0); gpio_pin_set_dt(&led_blue, 1); } while(0)
 #define LED_TURN_YELLOW() do { gpio_pin_set_dt(&led_red, 1); gpio_pin_set_dt(&led_green, 1); gpio_pin_set_dt(&led_blue, 0); } while(0)
-
-static const char *messages[] = {
-	"Hello, Server!",
-	"How are you?",
-	"Socket demo working.",
-	"Goodbye!",
-	NULL
-};
 
 
 LOG_MODULE_REGISTER(udp_socket_demo, LOG_LEVEL_DBG);
@@ -43,7 +36,7 @@ static const char *state_to_string(communication_state_t state)
 		return "COMM_WIFI_CONNECTING";
 	case COMM_WAITING_FOR_IP:
 		return "COMM_WAITING_FOR_IP";
-	case COMM_CONNECTING_TO_SERVER:
+	case COMM_ESTABLISHING_SERVER:
 		return "COMM_CONNECTING_TO_SERVER";
 	case COMM_SENDING_MESSAGES:
 		return "COMM_SENDING_MESSAGES";
@@ -82,80 +75,87 @@ static communication_state_t state_wifi_connecting(communication_context_t *ctx)
 
 static communication_state_t state_waiting_for_ip(communication_context_t *ctx)
 {
-	if (wifi_wait_for_ip_addr() != 0) {
+	if (wifi_wait_for_ip_addr(ctx->ip_addr) != 0) {
 		LOG_ERR("Failed while waiting for IPv4 address");
 		ctx->failure_from_state = COMM_WAITING_FOR_IP;
 		return COMM_FAILURE;
 	}
 	LED_TURN_GREEN();
-	return COMM_CONNECTING_TO_SERVER;
+	return COMM_ESTABLISHING_SERVER;
 }
 
-static communication_state_t state_connecting_to_server(communication_context_t *ctx)
+static communication_state_t state_establishing_server(communication_context_t *ctx)
 {
 	int ret;
 
+	// init socket
 	ctx->sock_fd = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (ctx->sock_fd < 0) {
 		LOG_ERR("Could not create socket (errno=%d)", errno);
-		ctx->failure_from_state = COMM_CONNECTING_TO_SERVER;
+		ctx->failure_from_state = COMM_ESTABLISHING_SERVER;
 		return COMM_FAILURE;
 	}
 	ctx->socket_open = true;
 
+	// set port
 	memset(&ctx->server_addr, 0, sizeof(ctx->server_addr));
 	ctx->server_addr.sin_family = AF_INET;
 	ctx->server_addr.sin_port = htons(SERVER_PORT);
+	ctx->server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-	ret = zsock_inet_pton(AF_INET, SERVER_IP, &ctx->server_addr.sin_addr);
-	if (ret != 1) {
-		LOG_ERR("Invalid SERVER_IP (%s)", SERVER_IP);
-		ctx->failure_from_state = COMM_CONNECTING_TO_SERVER;
-		return COMM_FAILURE;
-	}
-
-	ret = zsock_connect(ctx->sock_fd, (struct sockaddr *)&ctx->server_addr, sizeof(ctx->server_addr));
+	// bind socket to port
+	ret = zsock_bind(ctx->sock_fd, (struct sockaddr *) &ctx->server_addr, sizeof(ctx->server_addr));
 	if (ret < 0) {
-		LOG_ERR("Could not connect to server (errno=%d)", errno);
-		ctx->failure_from_state = COMM_CONNECTING_TO_SERVER;
+		LOG_ERR("Could not establish server (errno=%d)", errno);
+		ctx->failure_from_state = COMM_ESTABLISHING_SERVER;
 		return COMM_FAILURE;
 	}
 
-	LOG_INF("[Client] Connected to %s:%d", SERVER_IP, SERVER_PORT);
+	LOG_INF("[Server] listening at %s:%d", ctx->ip_addr, SERVER_PORT);
 	LED_TURN_YELLOW();
 	return COMM_SENDING_MESSAGES;
 }
 
 static communication_state_t state_sending_messages(communication_context_t *ctx)
 {
+	struct net_sockaddr client_addr;
+	net_socklen_t client_addr_len = sizeof(client_addr);
 	int ret;
 
-	for (int i = 0; messages[i] != NULL; i++) {
-		LED_TURN_GREEN();
-		ret = zsock_send(ctx->sock_fd, messages[i], strlen(messages[i]), 0);
-		LED_TURN_YELLOW();
-		if (ret < 0) {
-			LOG_ERR("send failed (errno=%d)", errno);
-			ctx->failure_from_state = COMM_SENDING_MESSAGES;
-			return COMM_FAILURE;
-		}
+	ctx->failure_from_state = COMM_SENDING_MESSAGES;
 
-		LOG_DBG("[Client] Sent: %s", messages[i]);
+	for (;;) {
 		LED_TURN_GREEN();
-		ret = zsock_recv(ctx->sock_fd, ctx->buffer, sizeof(ctx->buffer) - 1, 0);
+		ret = zsock_recvfrom(ctx->sock_fd, ctx->buffer, sizeof(ctx->buffer) - 1, 0, &client_addr, &client_addr_len);
 		LED_TURN_YELLOW();
 		if (ret <= 0) {
 			if (ret == 0) {
-				LOG_WRN("[Client] Server closed the connection");
+				LOG_WRN("[Server] Client closed the connection");
 			} else {
-				LOG_ERR("recv failed (errno=%d)", errno);
+				LOG_ERR("recvfrom failed (errno=%d)", errno);
 			}
-			ctx->failure_from_state = COMM_SENDING_MESSAGES;
 			return COMM_FAILURE;
 		}
 
+		if (net_addr_ntop(client_addr.sa_family,
+                 &((struct sockaddr_in *) &client_addr)->sin_addr,
+                 ctx->client_ip_addr,
+                 NET_IPV4_ADDR_LEN) == NULL) {
+        	LOG_ERR("Failed to convert gateway address to string");
+		}
+
 		ctx->buffer[ret] = '\0';
-		LOG_DBG("[Client] Received: %s", ctx->buffer);
+		LOG_DBG("[Server] Received: %s from %s", ctx->buffer, ctx->client_ip_addr);
+
+		char response[BUFFER_SIZE + 10];
+        snprintf(response, sizeof(response), "Echo: %s", ctx->buffer);
+		LED_TURN_GREEN();
+		ret = zsock_sendto(ctx->sock_fd, response, strlen(response), 0, &client_addr, client_addr_len);
+		LED_TURN_YELLOW();
+		if (ret < 0) {
+			LOG_ERR("send failed (errno=%d)", errno);
+			return COMM_FAILURE;
+		}
 	}
 
 	return COMM_CLEANUP;
@@ -185,7 +185,7 @@ static communication_state_t state_cleanup(communication_context_t *ctx)
 	if (ctx->socket_open) {
 		zsock_close(ctx->sock_fd);
 		ctx->socket_open = false;
-		LOG_INF("[Client] Closed");
+		LOG_INF("[Server] Closed");
 	}
 
 	if (ctx->wifi_connected) {
@@ -227,8 +227,8 @@ int run_udp_socket_demo(void)
 		case COMM_WAITING_FOR_IP:
 			state = state_waiting_for_ip(&ctx);
 			break;
-		case COMM_CONNECTING_TO_SERVER:
-			state = state_connecting_to_server(&ctx);
+		case COMM_ESTABLISHING_SERVER:
+			state = state_establishing_server(&ctx);
 			break;
 		case COMM_SENDING_MESSAGES:
 			state = state_sending_messages(&ctx);

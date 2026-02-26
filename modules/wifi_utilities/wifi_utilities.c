@@ -104,11 +104,10 @@ int wifi_connect(char *ssid, char *psk)
 }
 
 // Wait for an IP address to be obtained (blocking)
-int wifi_wait_for_ip_addr(void)
+int wifi_wait_for_ip_addr(char *ip_addr)
 {
     struct wifi_iface_status status;
     struct net_if *iface;
-    char ip_addr[NET_IPV4_ADDR_LEN];
     char gw_addr[NET_IPV4_ADDR_LEN];
 
     // Get interface
@@ -132,11 +131,11 @@ int wifi_wait_for_ip_addr(void)
     }
 
     // Get the IP address
-    memset(ip_addr, 0, sizeof(ip_addr));  // Clear the buffer
+    memset(ip_addr, 0, NET_IPV4_ADDR_LEN);  // Clear the buffer
     if (net_addr_ntop(AF_INET,
                 &iface->config.ip.ipv4->unicast[0].ipv4.address.in_addr,
                 ip_addr, 
-                sizeof(ip_addr)) == NULL) {
+                NET_IPV4_ADDR_LEN) == NULL) {
         LOG_ERR("Failed to convert IP address to string");
         return -1;
     } 

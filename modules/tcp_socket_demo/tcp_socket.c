@@ -43,7 +43,7 @@ static const char *state_to_string(communication_state_t state)
 		return "COMM_WIFI_CONNECTING";
 	case COMM_WAITING_FOR_IP:
 		return "COMM_WAITING_FOR_IP";
-	case COMM_CONNECTING_TO_SERVER:
+	case COMM_ESTABLISHING_SERVER:
 		return "COMM_CONNECTING_TO_SERVER";
 	case COMM_SENDING_MESSAGES:
 		return "COMM_SENDING_MESSAGES";
@@ -88,7 +88,7 @@ static communication_state_t state_waiting_for_ip(communication_context_t *ctx)
 		return COMM_FAILURE;
 	}
 	LED_TURN_GREEN();
-	return COMM_CONNECTING_TO_SERVER;
+	return COMM_ESTABLISHING_SERVER;
 }
 
 static communication_state_t state_connecting_to_server(communication_context_t *ctx)
@@ -98,7 +98,7 @@ static communication_state_t state_connecting_to_server(communication_context_t 
 	ctx->sock_fd = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (ctx->sock_fd < 0) {
 		LOG_ERR("Could not create socket (errno=%d)", errno);
-		ctx->failure_from_state = COMM_CONNECTING_TO_SERVER;
+		ctx->failure_from_state = COMM_ESTABLISHING_SERVER;
 		return COMM_FAILURE;
 	}
 	ctx->socket_open = true;
@@ -110,14 +110,14 @@ static communication_state_t state_connecting_to_server(communication_context_t 
 	ret = zsock_inet_pton(AF_INET, SERVER_IP, &ctx->server_addr.sin_addr);
 	if (ret != 1) {
 		LOG_ERR("Invalid SERVER_IP (%s)", SERVER_IP);
-		ctx->failure_from_state = COMM_CONNECTING_TO_SERVER;
+		ctx->failure_from_state = COMM_ESTABLISHING_SERVER;
 		return COMM_FAILURE;
 	}
 
 	ret = zsock_connect(ctx->sock_fd, (struct sockaddr *)&ctx->server_addr, sizeof(ctx->server_addr));
 	if (ret < 0) {
 		LOG_ERR("Could not connect to server (errno=%d)", errno);
-		ctx->failure_from_state = COMM_CONNECTING_TO_SERVER;
+		ctx->failure_from_state = COMM_ESTABLISHING_SERVER;
 		return COMM_FAILURE;
 	}
 
@@ -227,7 +227,7 @@ int run_tcp_socket_demo(void)
 		case COMM_WAITING_FOR_IP:
 			state = state_waiting_for_ip(&ctx);
 			break;
-		case COMM_CONNECTING_TO_SERVER:
+		case COMM_ESTABLISHING_SERVER:
 			state = state_connecting_to_server(&ctx);
 			break;
 		case COMM_SENDING_MESSAGES:

@@ -1,7 +1,6 @@
 #ifndef TCP_SOCKET_H
 #define TCP_SOCKET_H
 
-#define SERVER_IP   "192.168.5.29"
 #define SERVER_PORT 8080
 #define BUFFER_SIZE 1024
 
@@ -18,7 +17,7 @@
 typedef enum {
 	COMM_WIFI_CONNECTING,
 	COMM_WAITING_FOR_IP,
-	COMM_CONNECTING_TO_SERVER,
+	COMM_ESTABLISHING_SERVER,
 	COMM_SENDING_MESSAGES,
 	COMM_FAILURE,
 	COMM_CLEANUP,
@@ -28,6 +27,8 @@ typedef enum {
 typedef struct {
 	struct sockaddr_in server_addr;
 	char buffer[BUFFER_SIZE];
+	char ip_addr[NET_IPV4_ADDR_LEN];
+	char client_ip_addr[NET_IPV4_ADDR_LEN];
 	int sock_fd;
 	bool wifi_connected;
 	bool socket_open;
