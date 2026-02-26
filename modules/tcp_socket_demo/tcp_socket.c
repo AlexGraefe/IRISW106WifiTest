@@ -2,20 +2,24 @@
 #include <string.h>
 #include <stdbool.h>
 #include <zephyr/kernel.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/net/socket.h>
 
 #include "wifi_utilities.h"
-#include "wifi_pswd.h"
+#include "secret/wifi_pswd.h"
 #include "tcp_socket.h"
 
 #include <zephyr/logging/log.h>
 
+static const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
+static const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(LED1_NODE, gpios);
+static const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
 
-LOG_MODULE_REGISTER(tcp_socket, LOG_LEVEL_DBG);
-
-#define SERVER_IP   "192.168.5.29"
-#define SERVER_PORT 8080
-#define BUFFER_SIZE 1024
+#define LED_TURN_OFF() do { gpio_pin_set_dt(&led_red, 0); gpio_pin_set_dt(&led_green, 0); gpio_pin_set_dt(&led_blue, 0); } while(0)
+#define LED_TURN_RED() do { gpio_pin_set_dt(&led_red, 1); gpio_pin_set_dt(&led_green, 0); gpio_pin_set_dt(&led_blue, 0); } while(0)
+#define LED_TURN_GREEN() do { gpio_pin_set_dt(&led_red, 0); gpio_pin_set_dt(&led_green, 1); gpio_pin_set_dt(&led_blue, 0); } while(0)
+#define LED_TURN_BLUE() do { gpio_pin_set_dt(&led_red, 0); gpio_pin_set_dt(&led_green, 0); gpio_pin_set_dt(&led_blue, 1); } while(0)
+#define LED_TURN_YELLOW() do { gpio_pin_set_dt(&led_red, 1); gpio_pin_set_dt(&led_green, 1); gpio_pin_set_dt(&led_blue, 0); } while(0)
 
 static const char *messages[] = {
 	"Hello, Server!",
@@ -25,25 +29,12 @@ static const char *messages[] = {
 	NULL
 };
 
-typedef enum {
-	COMM_WIFI_CONNECTING,
-	COMM_WAITING_FOR_IP,
-	COMM_CONNECTING_TO_SERVER,
-	COMM_SENDING_MESSAGES,
-	COMM_FAILURE,
-	COMM_CLEANUP,
-	COMM_DONE,
-} communication_state_t;
 
-typedef struct {
-	struct sockaddr_in server_addr;
-	char buffer[BUFFER_SIZE];
-	int sock_fd;
-	bool wifi_connected;
-	bool socket_open;
-	int exit_code;
-	communication_state_t failure_from_state;
-} communication_context_t;
+LOG_MODULE_REGISTER(tcp_socket_demo, LOG_LEVEL_DBG);
+
+K_THREAD_DEFINE(BLINK_THREAD, CONFIG_SOCKET_THREAD_STACK_SIZE,
+                run_tcp_socket_demo, NULL, NULL, NULL,
+                SOCKET_THREAD_PRIORITY, 0, 0);
 
 static const char *state_to_string(communication_state_t state)
 {
@@ -69,6 +60,7 @@ static const char *state_to_string(communication_state_t state)
 
 static communication_state_t state_wifi_connecting(communication_context_t *ctx)
 {
+	LED_TURN_RED();
 	if (my_wifi_init() != 0) {
 		LOG_ERR("Failed to initialize WiFi module");
 		ctx->failure_from_state = COMM_WIFI_CONNECTING;
@@ -84,6 +76,7 @@ static communication_state_t state_wifi_connecting(communication_context_t *ctx)
 	}
 
 	ctx->wifi_connected = true;
+	LED_TURN_BLUE();
 	return COMM_WAITING_FOR_IP;
 }
 
@@ -94,7 +87,7 @@ static communication_state_t state_waiting_for_ip(communication_context_t *ctx)
 		ctx->failure_from_state = COMM_WAITING_FOR_IP;
 		return COMM_FAILURE;
 	}
-
+	LED_TURN_GREEN();
 	return COMM_CONNECTING_TO_SERVER;
 }
 
@@ -129,6 +122,7 @@ static communication_state_t state_connecting_to_server(communication_context_t 
 	}
 
 	LOG_INF("[Client] Connected to %s:%d", SERVER_IP, SERVER_PORT);
+	LED_TURN_YELLOW();
 	return COMM_SENDING_MESSAGES;
 }
 
@@ -137,7 +131,9 @@ static communication_state_t state_sending_messages(communication_context_t *ctx
 	int ret;
 
 	for (int i = 0; messages[i] != NULL; i++) {
+		LED_TURN_GREEN();
 		ret = zsock_send(ctx->sock_fd, messages[i], strlen(messages[i]), 0);
+		LED_TURN_YELLOW();
 		if (ret < 0) {
 			LOG_ERR("send failed (errno=%d)", errno);
 			ctx->failure_from_state = COMM_SENDING_MESSAGES;
@@ -145,8 +141,9 @@ static communication_state_t state_sending_messages(communication_context_t *ctx
 		}
 
 		LOG_DBG("[Client] Sent: %s", messages[i]);
-
+		LED_TURN_GREEN();
 		ret = zsock_recv(ctx->sock_fd, ctx->buffer, sizeof(ctx->buffer) - 1, 0);
+		LED_TURN_YELLOW();
 		if (ret <= 0) {
 			if (ret == 0) {
 				LOG_WRN("[Client] Server closed the connection");
@@ -174,6 +171,12 @@ static communication_state_t state_failure(communication_context_t *ctx)
 			ctx->exit_code);
 
 	ctx->exit_code = -1;
+	while (1) {
+		LED_TURN_RED();
+		k_sleep(K_SECONDS(1));
+		LED_TURN_OFF();
+		k_sleep(K_SECONDS(1));
+	}
 	return COMM_CLEANUP;
 }
 
@@ -195,14 +198,24 @@ static communication_state_t state_cleanup(communication_context_t *ctx)
 
 int run_tcp_socket_demo(void)
 {
+	communication_state_t state = COMM_WIFI_CONNECTING;
+
 	communication_context_t ctx = {
 		.sock_fd = -1,
 		.wifi_connected = false,
 		.socket_open = false,
 		.exit_code = 0,
-		.failure_from_state = COMM_DONE,
+		.failure_from_state = COMM_FAILURE,
 	};
-	communication_state_t state = COMM_WIFI_CONNECTING;
+
+	int ret = gpio_pin_configure_dt(&led_red, GPIO_OUTPUT_INACTIVE);
+    ret |= gpio_pin_configure_dt(&led_green, GPIO_OUTPUT_INACTIVE);
+    ret |= gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT_INACTIVE);
+    if (ret < 0) {
+        state = COMM_FAILURE;
+    }
+	LED_TURN_OFF();
+
 
 	LOG_INF("TCP ECHO CLIENT DEMO");
 
@@ -234,6 +247,7 @@ int run_tcp_socket_demo(void)
 			break;
 		}
 	}
+	LED_TURN_OFF();
 
 	return ctx.exit_code;
 }
